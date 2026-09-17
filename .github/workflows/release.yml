@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SOFTCAM_COMMIT: e89a699ed9932c74f57afe4f396be89665967e00
+  DOPECAM_CLSID: E53F2A16-5A12-44CE-A198-862D4BF84725
+
+jobs:
+  windows:
+    name: Windows x64 release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+        with:
+          msbuild-architecture: x64
+
+      - name: Build DopeCam
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          cmake -S .\windows -B .\build\windows -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+
+          cmake --build .\build\windows --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
+
+      - name: Build pinned DirectShow backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $Root = Join-Path $env:RUNNER_TEMP "dopecam-softcam"
+          git clone --quiet https://github.com/tshino/softcam.git $Root
+          git -C $Root checkout --quiet $env:SOFTCAM_COMMIT
+
+          $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+          $SoftcamCpp = Join-Path $Root "src\softcam\softcam.cpp"
+          $Text = [IO.File]::ReadAllText($SoftcamCpp).Replace("`r`n", "`n")
+
+          $Text = $Text.Replace(
+              'const wchar_t FILTER_NAME[] = L"DirectShow Softcam";',
+              'const wchar_t FILTER_NAME[] = L"DopeCam";'
+          )
+
+          $OldGuid = "DEFINE_GUID(CLSID_DShowSoftcam,`n0xaef3b972, 0x5fa5, 0x4647, 0x95, 0x71, 0x35, 0x8e, 0xb4, 0x72, 0xbc, 0x9e);"
+          $NewGuid = "DEFINE_GUID(CLSID_DShowSoftcam,`n0xe53f2a16, 0x5a12, 0x44ce, 0xa1, 0x98, 0x86, 0x2d, 0x4b, 0xf8, 0x47, 0x25);"
+          $Text = $Text.Replace($OldGuid, $NewGuid)
+
+          [IO.File]::WriteAllText($SoftcamCpp, $Text, $Utf8NoBom)
+
+          $SenderCpp = Join-Path $Root "src\softcamcore\SenderAPI.cpp"
+          $Text = [IO.File]::ReadAllText($SenderCpp)
+          $Text = $Text.Replace(
+              "if (0.0f < framerate)",
+              "if (false && 0.0f < framerate)"
+          )
+          [IO.File]::WriteAllText($SenderCpp, $Text, $Utf8NoBom)
+
+          $FrameBufferCpp = Join-Path $Root "src\softcamcore\FrameBuffer.cpp"
+          $Text = [IO.File]::ReadAllText($FrameBufferCpp)
+          $Text = $Text.Replace(
+              'const char NamedMutexName[] = "DirectShow Softcam/NamedMutex";',
+              'const char NamedMutexName[] = "DopeCam/NamedMutex";'
+          )
+          $Text = $Text.Replace(
+              'const char SharedMemoryName[] = "DirectShow Softcam/SharedMemory";',
+              'const char SharedMemoryName[] = "DopeCam/SharedMemory";'
+          )
+          [IO.File]::WriteAllText($FrameBufferCpp, $Text, $Utf8NoBom)
+
+          msbuild "$Root\src\softcam\softcam.vcxproj" `
+              /m `
+              /t:Rebuild `
+              /p:Configuration=Release `
+              /p:Platform=x64 `
+              /p:PlatformToolset=v143 `
+              /nologo `
+              /verbosity:minimal
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "DirectShow backend build failed"
+          }
+
+          $Candidates = @(
+              (Join-Path $Root "dist\bin\x64\softcam.dll"),
+              (Join-Path $Root "src\softcam\dist\bin\x64\softcam.dll"),
+              (Join-Path $Root "src\softcam\x64\Release\softcam.dll")
+          )
+
+          $Dll = $Candidates |
+              Where-Object { Test-Path $_ } |
+              Select-Object -First 1
+
+          if (-not $Dll) {
+              throw "softcam.dll was not found after build"
+          }
+
+          Copy-Item $Dll .\build\windows\Release\DopeCamVirtualCamera.dll -Force
+
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          New-Item -ItemType Directory -Force -Path .\dist\windows | Out-Null
+
+          Copy-Item .\build\windows\Release\DopeCam.exe .\dist\windows\DopeCam.exe
+          Copy-Item .\build\windows\Release\DopeCamVirtualCamera.dll .\dist\windows\DopeCamVirtualCamera.dll
+          Copy-Item .\build\windows\Release\DopeCamDirectShowCheck.exe .\dist\windows\DopeCamDirectShowCheck.exe
+
+          @"
+          DopeCam Windows x64
+
+          1. Keep DopeCamVirtualCamera.dll next to DopeCam.exe.
+          2. Register DopeCamVirtualCamera.dll with 64-bit regsvr32 using an elevated terminal.
+          3. Arm the Android app and start the DopeCam stream before opening/restarting the camera consumer.
+          4. Select DopeCam in the consumer.
+
+          DirectShow CLSID:
+          {E53F2A16-5A12-44CE-A198-862D4BF84725}
+
+          This is an early private checkpoint, not a polished installer.
+          "@ | Set-Content -Encoding UTF8 .\dist\windows\INSTALL.txt
+
+          Compress-Archive `
+              -Path .\dist\windows\DopeCam.exe, .\dist\windows\DopeCamVirtualCamera.dll, .\dist\windows\DopeCamDirectShowCheck.exe, .\dist\windows\INSTALL.txt `
+              -DestinationPath .\dist\DopeCam-Windows-x64.zip `
+              -Force
+
+          Copy-Item .\dist\windows\DopeCam.exe .\dist\DopeCam.exe
+          Copy-Item .\dist\windows\DopeCamVirtualCamera.dll .\dist\DopeCamVirtualCamera.dll
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: |
+            dist/DopeCam-Windows-x64.zip
+            dist/DopeCam.exe
+            dist/DopeCamVirtualCamera.dll
+
+  android:
+    name: Android release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.6.0"
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -e
+          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" >/dev/null
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          set -e
+          gradle -p android clean :app:assembleDebug --no-daemon
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DopeCam-Android-debug.apk
+
+      - name: Upload Android release asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: dist/DopeCam-Android-debug.apk
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - windows
+      - android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Windows assets
+        uses: actions/download-artifact@v8
+        with:
+          name: release-windows
+          path: release
+
+      - name: Download Android asset
+        uses: actions/download-artifact@v8
+        with:
+          name: release-android
+          path: release
+
+      - name: List release assets
+        shell: bash
+        run: find release -maxdepth 2 -type f -print
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -e
+
+          gh release create "${GITHUB_REF_NAME}" \
+            release/DopeCam-Windows-x64.zip \
+            release/DopeCam.exe \
+            release/DopeCamVirtualCamera.dll \
+            release/DopeCam-Android-debug.apk \
+            --verify-tag \
+            --generate-notes \
+            --title "DopeCam ${GITHUB_REF_NAME}"

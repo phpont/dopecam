@@ -1,0 +1,58 @@
+# Build output
+/build/
+/windows/build/
+/android/.gradle/
+/android/**/build/
+/.gradle/
+
+# Android local configuration / signing
+/android/local.properties
+/local.properties
+*.jks
+*.keystore
+keystore.properties
+
+# Native build byproducts
+*.obj
+*.o
+*.pdb
+*.ilk
+*.idb
+*.lib
+*.exp
+
+# Generated distributables
+*.apk
+*.aab
+*.exe
+*.dll
+
+# IDE / editor
+/.vs/
+/.idea/
+/.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+
+# Local tools and caches
+/DopeCamBuildTools/
+/softcam-*/
+/.cache/
+/tmp/
+/temp/
+
+# Logs / diagnostics
+*.log
+*.dmp
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
