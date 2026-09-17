@@ -176,8 +176,25 @@ jobs:
       - name: Install Android API 36
         shell: bash
         run: |
-          set -e
-          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          echo "Android SDK: $SDK"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found at: $SDKMANAGER"
+            find "$SDK/cmdline-tools" -maxdepth 3 -type f -name sdkmanager -print 2>/dev/null || true
+            exit 1
+          fi
+          echo "sdkmanager: $SDKMANAGER"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            >/dev/null
+          test -f "$SDK/platforms/android-36/android.jar"
+          test -d "$SDK/build-tools/36.0.0"
+          echo "ANDROID_SDK_GATE=PASS"
 
       - name: Build Android APK
         shell: bash
