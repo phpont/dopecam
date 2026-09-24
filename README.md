@@ -1,4 +1,4 @@
-# DopeCam
+updated=UI roadmap updated=repository layout updated=minimal UI dependencies decision updated=current UI status updated=checkpoint wording # DopeCam
 
 DopeCam is a personal, lightweight phone-to-PC webcam project. The current checkpoint streams the camera from a Samsung Galaxy Z Flip 7 to Windows over the local network and exposes the result as a Windows camera.
 
@@ -6,7 +6,7 @@ The repository is private for now. There is no public product, installer, suppor
 
 ## Current status
 
-The first working end-to-end checkpoint is functional:
+The current end-to-end checkpoint is functional:
 
 - Android app can be armed and left waiting for the PC.
 - Windows can discover the phone automatically on the same LAN.
@@ -14,7 +14,8 @@ The first working end-to-end checkpoint is functional:
 - The PC can select the camera and one of three quality presets: Budget, Normal, or Quality.
 - H.264 video is produced on Android with the hardware media stack and streamed over the LAN.
 - Windows receives and decodes the stream with Media Foundation and renders it with D3D11.
-- Zoom, 90-degree rotation and horizontal/vertical mirroring are controllable from the PC.
+- Zoom uses an immediate logarithmic slider on Windows; 90-degree rotation and horizontal/vertical mirroring remain PC-controlled.
+- Windows and Android use the shared DopeCam D-cut branding while staying on native platform UI.
 - The transformed output can be exposed as the `DopeCam` virtual camera.
 - The current virtual-camera backend works in real browser camera consumers at 30 fps.
 
@@ -100,7 +101,7 @@ The project currently follows these constraints:
 5. **Latency over perfect frame retention.** A live camera should prefer fresh frames instead of building an ever-growing queue.
 6. **Three presets.** Budget prioritizes efficiency, Normal balances quality and cost, and Quality uses the best settings that fit the current pipeline.
 7. **Transforms happen on the PC.** Rotation and mirroring do not need to consume extra phone resources.
-8. **Minimal UI dependencies.** The current interfaces are functional first; visual modernization comes later without introducing a large framework.
+8. **Minimal UI dependencies.** Both clients use native platform UI and shared branding without introducing a large framework.
 9. **No USB or audio in the current milestone.**
 10. **No unnecessary resident process.** The long-term design should consume resources only while the camera is being used.
 
@@ -123,8 +124,9 @@ This is a known implementation detail to improve, not the intended final UX.
 ## Repository layout
 
 ```text
-android/                 Android camera/encoder/server
+android/                 Android camera/encoder/server/UI
 windows/                 Native Windows receiver/decoder/UI
+assets/branding/         Shared DopeCam branding source assets
 docs/                    Architecture notes when needed
 .github/workflows/       CI and tag-based release automation
 ```
@@ -185,15 +187,14 @@ The Android asset is intentionally a debug APK at this checkpoint. Release signi
 - Make the virtual camera lifecycle independent of consumer startup order.
 - Add x86 DirectShow registration/build for 32-bit consumers.
 - Measure CPU, GPU, memory, network throughput and phone battery/thermal cost for all presets.
-- Replace the zoom text field with an immediate logarithmic slider.
 - Improve camera selection and expose the real device-supported zoom range.
 - Persist useful PC-side settings without adding a heavy configuration layer.
 - Harden reconnect/recovery when Wi-Fi changes or a stream is interrupted.
 
-### UI pass
+### UI / UX
 
-- Modernize the Windows UI with native lightweight rendering.
-- Modernize the Android UI without adopting a heavy framework.
+- Keep Windows and Android branding and interaction patterns in sync without adding a shared UI runtime.
+- Polish accessibility, keyboard navigation and high-DPI behavior where measurements justify it.
 - Keep preview rendering event/frame driven rather than continuously repainting idle UI.
 - Preserve low startup time and small binaries.
 

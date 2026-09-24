@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(DopeCam VERSION 0.1.0 LANGUAGES CXX)
+project(DopeCam VERSION 0.2.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "DopeCam Windows client only builds on Windows.")
