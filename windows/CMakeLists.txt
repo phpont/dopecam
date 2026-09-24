@@ -5,7 +5,14 @@ if(NOT WIN32)
     message(FATAL_ERROR "DopeCam Windows client only builds on Windows.")
 endif()
 
+configure_file(
+    resources/DopeCam.rc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/DopeCam.rc
+    @ONLY
+)
+
 add_executable(DopeCam WIN32
+    ${CMAKE_CURRENT_BINARY_DIR}/DopeCam.rc
     src/main.cpp
     src/NetworkClient.cpp
     src/RtpReceiver.cpp

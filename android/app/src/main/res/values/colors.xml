@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="dopecam_background">#F6F7F9</color>
+    <color name="dopecam_surface">#FFFFFF</color>
+    <color name="dopecam_primary">#14161A</color>
+    <color name="dopecam_icon_background">#14161A</color>
+</resources>

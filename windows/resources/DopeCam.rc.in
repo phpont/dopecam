@@ -1,0 +1,2 @@
+101 ICON "@CMAKE_CURRENT_SOURCE_DIR@/resources/dopecam.ico"
+102 ICON "@CMAKE_CURRENT_SOURCE_DIR@/resources/dopecam-mark.ico"

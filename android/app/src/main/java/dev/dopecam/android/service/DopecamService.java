@@ -3,10 +3,14 @@ package dev.dopecam.android.service;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
+
+import dev.dopecam.android.MainActivity;
+import dev.dopecam.android.R;
 
 import dev.dopecam.android.camera.CameraCatalog;
 import dev.dopecam.android.camera.CameraController;
@@ -43,10 +47,21 @@ public final class DopecamService extends Service {
         ready = false;
         lastError = "";
         createNotificationChannel();
+        Intent launchIntent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent contentIntent = PendingIntent.getActivity(
+                this,
+                0,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         Notification notification = new Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("DopeCam is armed")
-                .setContentText("Waiting for your PC on the local network")
-                .setSmallIcon(android.R.drawable.presence_video_online)
+                .setContentText("Ready for your PC on the local network")
+                .setSmallIcon(R.drawable.ic_dopecam_notification)
+                .setContentIntent(contentIntent)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setColor(0xFF14161A)
                 .setOngoing(true)
                 .build();
         startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA);
