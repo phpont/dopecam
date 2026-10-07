@@ -1,232 +1,424 @@
-updated=UI roadmap updated=repository layout updated=minimal UI dependencies decision updated=current UI status updated=checkpoint wording # DopeCam
+# DopeCam
 
-DopeCam is a personal, lightweight phone-to-PC webcam project. The current checkpoint streams the camera from a Samsung Galaxy Z Flip 7 to Windows over the local network and exposes the result as a Windows camera.
+A lightweight, local-first phone-to-PC webcam bridge for Android and Windows.
 
-The repository is private for now. There is no public product, installer, support promise, telemetry service, account system, or cloud relay.
+DopeCam turns an Android phone into a Windows webcam over the local network, with hardware H.264 encoding on the phone, native decoding and rendering on Windows, and no cloud relay.
 
-## Current status
+The project started from a simple goal: use my phone as a webcam without USB, accounts, subscriptions, browser runtimes, or sending video through someone else's servers.
 
-The current end-to-end checkpoint is functional:
+It currently works end to end at 30 fps with real browser and desktop camera consumers.
 
-- Android app can be armed and left waiting for the PC.
-- Windows can discover the phone automatically on the same LAN.
-- Manual IP connection remains available as a fallback.
-- The PC can select the camera and one of three quality presets: Budget, Normal, or Quality.
-- H.264 video is produced on Android with the hardware media stack and streamed over the LAN.
-- Windows receives and decodes the stream with Media Foundation and renders it with D3D11.
-- Zoom uses an immediate logarithmic slider on Windows; 90-degree rotation and horizontal/vertical mirroring remain PC-controlled.
-- Windows and Android use the shared DopeCam D-cut branding while staying on native platform UI.
-- The transformed output can be exposed as the `DopeCam` virtual camera.
-- The current virtual-camera backend works in real browser camera consumers at 30 fps.
+## What it does
+
+```text
+Android phone
+    |
+    | Camera2
+    | MediaCodec / H.264
+    | RTP over LAN
+    v
+Windows app
+    |
+    | Media Foundation decode
+    | D3D11 transforms / preview
+    | virtual camera output
+    v
+Meet / Discord / Chrome / other camera consumers
+```
+
+The Android app captures and encodes the camera stream using the device's hardware media stack.
+
+The Windows client discovers the phone on the LAN, controls the session, receives and decodes the H.264 stream, applies transforms, renders a preview, and publishes the result as a Windows camera.
+
+## Current features
+
+- Automatic phone discovery on the local network
+- Manual IP connection as a fallback
+- Front and rear camera selection
+- Three quality presets: `Budget`, `Normal`, and `Quality`
+- Hardware H.264 encoding on Android
+- RTP/H.264 transport over the LAN
+- Native H.264 decoding on Windows
+- D3D11 preview and video transforms
+- Immediate logarithmic zoom control
+- 90° rotation
+- Horizontal and vertical mirroring
+- Windows virtual camera output
+- 30 fps output in real browser camera consumers
+- Shared DopeCam branding across both platforms
+- Tag-based Windows and Android release builds through GitHub Actions
+
+## Why local-first
+
+DopeCam deliberately has no cloud video path.
+
+Video stays between the phone and the PC on the local network.
+
+There is currently:
+
+- no account system
+- no telemetry service
+- no cloud relay
+- no remote video storage
+- no third-party media backend
+
+That decision is both a privacy constraint and an architectural one. A local webcam should not need an internet round trip to move video between two devices sitting next to each other.
 
 ## Architecture
 
-```text
-Galaxy Z Flip 7
-    |
-    | Camera2 -> MediaCodec -> H.264
-    | LAN
-    v
-Windows DopeCam.exe
-    |
-    | discovery / control
-    | RTP receive
-    | Media Foundation decode
-    | D3D11 transform / preview
-    v
-VirtualCameraPublisher
-    |
-    | shared memory sender
-    v
-DopeCam DirectShow filter
-    |
-    v
-Chrome / Meet / Discord / other camera consumers
-```
-
 ### Android
 
-The Android side is deliberately small. It uses platform APIs instead of a heavy UI or media framework.
+The Android side intentionally stays close to the platform.
 
-Current direction:
+```text
+Camera2
+   |
+   v
+Surface
+   |
+   v
+MediaCodec
+   |
+   | H.264
+   v
+RTP sender
+   |
+   v
+LAN
+```
 
-- Java / Android platform APIs.
-- Camera2 for camera access.
-- MediaCodec for hardware H.264 encoding.
-- Surface-based camera-to-encoder path to avoid unnecessary CPU frame copies.
-- LAN-only transport.
-- The phone can run armed while the screen is off.
-- Camera, preset and zoom are controlled from the PC.
+Current stack:
+
+- Java 17
+- Android platform APIs
+- Camera2
+- MediaCodec
+- hardware H.264 encoding
+- foreground camera service
+- UDP/TCP networking
+
+The camera feeds the encoder through a surface-based path to avoid unnecessary application-level frame copies.
+
+The phone can remain armed while the screen is off, while camera selection, preset selection, and zoom are controlled from the PC.
 
 ### Windows
 
-The Windows side is native C++20.
-
-Current direction:
-
-- Win32 UI.
-- Media Foundation for H.264 decoding.
-- D3D11 for rendering and video transforms.
-- UDP-based LAN discovery.
-- TCP control channel.
-- RTP/H.264 video transport.
-- No Electron, WebView, Qt or other large UI runtime.
-
-The current machine is Windows 10 build 19045. `MFCreateVirtualCamera` is therefore not available, so the current compatibility backend is DirectShow.
-
-The virtual-camera implementation uses `tshino/softcam`, pinned to commit:
+The Windows client is native C++20.
 
 ```text
-e89a699ed9932c74f57afe4f396be89665967e00
+LAN
+ |
+ v
+UDP discovery / TCP control / RTP video
+ |
+ v
+Media Foundation
+ |
+ | decoded frames
+ v
+D3D11
+ |
+ | transforms + preview
+ v
+VirtualCameraPublisher
+ |
+ v
+DirectShow camera
 ```
 
-The dependency is not vendored into this repository. Build/release automation fetches the pinned source and applies DopeCam-specific branding, CLSID and IPC namespace changes before compiling it.
+Current stack:
 
-Current DopeCam DirectShow CLSID:
+- C++20
+- Win32
+- Winsock
+- Media Foundation
+- D3D11 / DXGI
+- DirectShow compatibility backend
+
+There is no Electron, WebView, Qt, or other large UI runtime.
+
+The goal is to keep the client small, responsive, and close to the operating system APIs it depends on.
+
+## Design decisions
+
+DopeCam is built around a few deliberate constraints.
+
+### Prefer latency over perfect frame retention
+
+A live camera should display the freshest useful frame.
+
+If processing falls behind, letting an ever-growing queue accumulate produces a technically complete stream and a terrible webcam.
+
+The pipeline therefore prioritizes low latency rather than preserving every frame at all costs.
+
+### Encode on the phone
+
+Android devices already have dedicated media hardware.
+
+DopeCam uses the platform H.264 encoder instead of moving raw camera frames through application-level CPU buffers before transmission.
+
+### Keep expensive transforms on the PC
+
+Rotation and mirroring happen on Windows.
+
+The phone's primary job is to capture and encode the camera stream efficiently.
+
+### Avoid unnecessary runtime weight
+
+Both applications use native platform UI.
+
+The project intentionally avoids introducing a large cross-platform UI runtime solely to share interface code between two small clients.
+
+### No cloud relay
+
+If the phone and computer are on the same LAN, the shortest useful path is the local network.
+
+The architecture follows that assumption.
+
+### Treat privacy as an architectural property
+
+The absence of a cloud video path is not a settings toggle.
+
+It is part of the current system design.
+
+## Quality presets
+
+DopeCam exposes three user-facing presets instead of requiring manual tuning of every media parameter.
+
+| Preset | Goal |
+| --- | --- |
+| `Budget` | Minimize resource and network usage |
+| `Normal` | Balance quality, latency, and cost |
+| `Quality` | Prefer image quality within the current pipeline |
+
+The long-term goal is to make these presets adapt better to measured device, network, battery, and thermal conditions.
+
+## Connection model
+
+DopeCam uses different channels for different responsibilities.
 
 ```text
-{E53F2A16-5A12-44CE-A198-862D4BF84725}
+UDP
+  └── local device discovery
+
+TCP
+  └── session control
+
+RTP / H.264
+  └── video transport
 ```
 
-`tshino/softcam` is MIT licensed.
+The PC can discover an armed phone automatically when both devices are on the same network.
 
-## Engineering decisions
+Manual IP connection remains available because local-network discovery is not guaranteed to work on every router or network configuration.
 
-The project currently follows these constraints:
+## Virtual camera
 
-1. **LAN only.** USB support is intentionally out of scope.
-2. **No cloud path.** Video stays on the local network.
-3. **Hardware encode on Android.** Raw camera frames should not be pushed through application-level CPU buffers.
-4. **Hardware-oriented Windows pipeline.** Media Foundation and D3D11 remain the preferred decode/render path.
-5. **Latency over perfect frame retention.** A live camera should prefer fresh frames instead of building an ever-growing queue.
-6. **Three presets.** Budget prioritizes efficiency, Normal balances quality and cost, and Quality uses the best settings that fit the current pipeline.
-7. **Transforms happen on the PC.** Rotation and mirroring do not need to consume extra phone resources.
-8. **Minimal UI dependencies.** Both clients use native platform UI and shared branding without introducing a large framework.
-9. **No USB or audio in the current milestone.**
-10. **No unnecessary resident process.** The long-term design should consume resources only while the camera is being used.
+The transformed stream is published as a Windows camera so existing applications can consume DopeCam without custom integrations.
 
-## Current virtual-camera limitation
+The current compatibility implementation uses [`tshino/softcam`](https://github.com/tshino/softcam) as the DirectShow camera backend.
 
-The DirectShow filter is currently x64 only.
+The dependency is pinned during builds instead of being vendored into this repository. Build automation fetches the expected revision and applies the DopeCam-specific camera identity and IPC configuration before compiling it.
 
-The current backend also has a lifecycle caveat: the DopeCam sender should already be active before a camera consumer performs its device/capability discovery. Browsers and desktop apps can cache camera enumeration, so after starting DopeCam it may be necessary to fully restart the consumer before `DopeCam` appears.
-
-Current reliable order:
-
-1. Arm DopeCam on the phone.
-2. Open `DopeCam.exe`.
-3. Discover/connect and press Start.
-4. Then open or fully restart the application that will consume the camera.
-5. Select `DopeCam`.
-
-This is a known implementation detail to improve, not the intended final UX.
+`tshino/softcam` is licensed under the MIT License.
 
 ## Repository layout
 
 ```text
-android/                 Android camera/encoder/server/UI
-windows/                 Native Windows receiver/decoder/UI
-assets/branding/         Shared DopeCam branding source assets
-docs/                    Architecture notes when needed
-.github/workflows/       CI and tag-based release automation
+android/
+    Android camera, encoder, networking, service, and UI
+
+windows/
+    Windows networking, media pipeline, preview, transforms,
+    and virtual camera publisher
+
+assets/
+    Shared branding assets
+
+docs/
+    Architecture and implementation notes
+
+.github/workflows/
+    CI and release automation
 ```
 
-## Local build
+## Build from source
 
-### Windows client
+### Requirements
+
+#### Windows
+
+- Windows 10 or Windows 11
+- Visual Studio / MSVC with C++ tooling
+- CMake 3.24+
+- x64 build environment
+
+#### Android
+
+- JDK 17
+- Android SDK 36
+- Android Build Tools 36.0.0
+- Gradle 9.6
+
+The Android application currently targets Android 13 and newer.
+
+### Build the Windows client
 
 ```powershell
 cmake -S .\windows -B .\build\windows -A x64
 cmake --build .\build\windows --config Release --parallel
 ```
 
-Main executable:
+The main executable will be available at:
 
 ```text
 build\windows\Release\DopeCam.exe
 ```
 
-The virtual-camera DLL is built separately from the pinned DirectShow dependency and must sit next to `DopeCam.exe` for the sender path. It must also be registered with `regsvr32` for Windows camera consumers.
+The virtual-camera backend is built separately and must be registered on Windows before applications can enumerate it as a camera device.
 
-### Android
-
-The current build uses JDK 17, Gradle 9.6.0, Android platform 36 and build-tools 36.0.0.
+### Build the Android app
 
 ```powershell
 gradle -p .\android clean :app:assembleDebug --no-daemon
 ```
 
-Current APK:
+The APK will be generated under:
 
 ```text
-android\app\build\outputs\apk\debug\app-debug.apk
+android\app\build\outputs\apk\debug\
 ```
 
-## CI/CD
+## CI and releases
 
-`CI` runs for pushes and pull requests against `main`:
+CI runs on pushes and pull requests targeting `main`.
 
-- Windows C++ build.
-- Pinned DirectShow backend build.
-- Android build.
-- Build artifacts are retained by GitHub Actions.
+It currently verifies:
 
-`Release` runs for tags matching `v*`:
+- Windows C++ build
+- DirectShow compatibility backend build
+- Android build
 
-- Builds the Windows x64 client.
-- Builds the pinned DopeCam DirectShow DLL.
-- Builds the Android APK.
-- Publishes the Windows package, raw executable/DLL, and APK to the same GitHub Release.
+Build artifacts are retained by GitHub Actions.
 
-The Android asset is intentionally a debug APK at this checkpoint. Release signing is a later milestone.
+Tags matching:
 
-## Roadmap
+```text
+v*
+```
 
-### Near term
+trigger the release workflow.
 
-- Make the virtual camera lifecycle independent of consumer startup order.
-- Add x86 DirectShow registration/build for 32-bit consumers.
-- Measure CPU, GPU, memory, network throughput and phone battery/thermal cost for all presets.
-- Improve camera selection and expose the real device-supported zoom range.
-- Persist useful PC-side settings without adding a heavy configuration layer.
-- Harden reconnect/recovery when Wi-Fi changes or a stream is interrupted.
+A release build currently produces:
 
-### UI / UX
+- Windows x64 client
+- DopeCam DirectShow virtual-camera DLL
+- Android APK
 
-- Keep Windows and Android branding and interaction patterns in sync without adding a shared UI runtime.
-- Polish accessibility, keyboard navigation and high-DPI behavior where measurements justify it.
-- Keep preview rendering event/frame driven rather than continuously repainting idle UI.
-- Preserve low startup time and small binaries.
+Android release signing and polished end-user packaging are still future work.
 
-### Media / performance
+## Known limitations
 
-- Revisit the DirectShow BGR24 bridge after compatibility is stable.
-- Reduce avoidable GPU readback / CPU color-conversion work.
-- Investigate a leaner native virtual-camera bridge if measurements justify replacing Softcam.
-- Add adaptive bitrate / congestion feedback.
-- Add thermal and battery-aware behavior on Android.
-- Consider 60 fps only after the 30 fps path is measured and stable.
+DopeCam is functional, but it is still an experimental personal project rather than a polished end-user product.
+
+### Virtual-camera startup order
+
+The current DirectShow backend works most reliably when DopeCam is already streaming before another application enumerates available camera devices.
+
+Some browsers and desktop applications cache camera enumeration.
+
+The most reliable sequence is currently:
+
+1. Arm DopeCam on the phone.
+2. Start the Windows client.
+3. Connect to the phone.
+4. Start streaming.
+5. Open or restart the application that will use the camera.
+6. Select `DopeCam`.
+
+Making the virtual-camera lifecycle independent from consumer startup order is one of the main remaining tasks.
+
+### x64 only
+
+The current DirectShow camera backend targets x64 Windows applications.
+
+32-bit camera consumers are not yet supported.
 
 ### Packaging
 
-- Add a small installer/uninstaller for the Windows camera registration.
-- Configure Android release signing.
-- Produce cleaner release assets from a single version/tag.
-- Keep Android and Windows versions in lockstep.
+There is not yet a polished installer.
+
+The current project is primarily intended to be built and tested from source.
+
+## Roadmap
+
+### Reliability
+
+- Make virtual-camera startup independent from consumer enumeration order
+- Improve reconnect and recovery behavior after Wi-Fi changes
+- Persist useful PC-side settings
+- Improve automatic camera discovery behavior across different networks
+- Add x86 virtual-camera support where useful
+
+### Performance
+
+- Measure CPU, GPU, memory, bandwidth, battery usage, and thermals for every preset
+- Reduce avoidable GPU readback and CPU color conversion
+- Add adaptive bitrate and congestion feedback
+- Add thermal and battery-aware behavior on Android
+- Evaluate 60 fps after the 30 fps pipeline is measured and stable
+
+### Camera controls
+
+- Improve device camera enumeration
+- Expose real device-supported zoom ranges
+- Expand useful camera controls without turning the interface into a camera-control panel
+
+### UI and UX
+
+- Keep Android and Windows interaction patterns visually related without sharing a heavy UI runtime
+- Improve accessibility and keyboard navigation
+- Improve high-DPI behavior
+- Keep preview rendering event-driven rather than repainting unnecessarily
+- Preserve low startup time and small binaries
+
+### Virtual camera
+
+- Revisit the current BGR24 compatibility bridge after the basic lifecycle is stable
+- Investigate a leaner native camera backend
+- Evaluate a Media Foundation virtual-camera implementation when Windows 11 becomes the supported baseline
+
+### Distribution
+
+- Add a small Windows installer and uninstaller
+- Configure Android release signing
+- Produce cleaner release packages from a single version tag
+- Keep Android and Windows versions synchronized
 
 ### Later
 
-- Evaluate a Media Foundation virtual-camera backend when Windows 11 becomes the supported baseline.
-- Optional audio only if it can be added without compromising the project's lightweight scope.
+- Optional audio support, if it can be added without compromising the lightweight design
 
-## Versioning
+## Project status
 
-Android and Windows move together. A single Git tag represents one DopeCam checkpoint and the release assets for both sides.
+DopeCam is actively developed.
 
-Initial development line:
+The current `v0.x` line represents experimental checkpoints rather than a stable public API or compatibility contract.
 
-```text
-v0.x
-```
+Android and Windows versions move together, and one Git tag represents one matching cross-platform release.
 
-No public compatibility guarantee exists yet.
+## What I wanted to explore
+
+DopeCam started as a practical tool for myself, but it also became an excuse to explore a few questions I find interesting:
+
+- How little software is actually necessary to turn a modern phone into a useful webcam?
+- Which work belongs on the phone, and which belongs on the PC?
+- How much latency can be removed by designing the pipeline around live interaction instead of file-style media processing?
+- Can two platform-native applications still feel like one product without introducing a shared runtime?
+- What does a webcam architecture look like when local processing and privacy are defaults rather than optional features?
+
+Those questions have influenced the architecture more than any particular framework or library.
+
+## Author
+
+Built by [Paulo Pontarolo](https://github.com/phpont).
